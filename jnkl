@@ -1,0 +1,106 @@
+# main.py
+
+import tkinter as tk
+from binance.client import Client
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+import pandas as pd
+import time
+
+# Binance API iestatījumi
+API_KEY = 'JŪSU_BINANCE_API_ATSLĒGA'
+API_SECRET = 'JŪSU_BINANCE_SLEPENĀ_ATSLĒGA'
+client = Client(API_KEY, API_SECRET)
+
+# Funkcija, kas iegūst datus no Binance
+def get_binance_data(symbol, interval='1h', limit=100):
+    candles = client.get_klines(symbol=symbol, interval=interval, limit=limit)
+    df = pd.DataFrame(candles, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', *['ignore']*5])
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df['close'] = df['close'].astype(float)
+    return df
+
+# RSI Stratēģija
+def rsi_strategy(data):
+    delta = data['close'].diff()
+    up = delta.clip(lower=0)
+    down = -1 * delta.clip(upper=0)
+    ema_up = up.ewm(com=14 - 1, adjust=False).mean()
+    ema_down = down.ewm(com=14 - 1, adjust=False).mean()
+    rs = ema_up / ema_down
+    rsi = 100 - (100 / (1 + rs))
+    data['RSI'] = rsi
+    if data['RSI'].iloc[-1] < 30:
+        return "CALL"  # Pirkšanas signāls
+    elif data['RSI'].iloc[-1] > 70:
+        return "PUT"   # Pārdodēja signāls
+    else:
+        return "HOLD"  # Gaidīšana
+
+# MACD Stratēģija
+def macd_strategy(data):
+    short_ema = data['close'].ewm(span=12, adjust=False).mean()
+    long_ema = data['close'].ewm(span=26, adjust=False).mean()
+    macd = short_ema - long_ema
+    signal = macd.ewm(span=9, adjust=False).mean()
+    data['MACD'] = macd
+    data['Signal'] = signal
+    if macd.iloc[-1] > signal.iloc[-1]:
+        return "CALL"  # Tirdzniecība augšup
+    elif macd.iloc[-1] < signal.iloc[-1]:
+        return "PUT"   # Tirdzniecība lejup
+    else:
+        return "HOLD"  # Gaidīšana
+
+# GUI Izveide
+class TradingApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("JNKL-GRUPA Tirdzniecības Platforma")
+        
+        # Valūtas izvēle
+        self.symbol_label = tk.Label(root, text="Ievadiet valūtu pāru (piemēram, BTCUSDT):")
+        self.symbol_label.pack()
+        self.symbol_entry = tk.Entry(root)
+        self.symbol_entry.pack()
+
+        # Stratēģijas izvēle
+        self.strategy_label = tk.Label(root, text="Izvēlieties stratēģiju (RSI vai MACD):")
+        self.strategy_label.pack()
+        self.strategy_var = tk.StringVar(value="RSI")
+        self.strategy_rsi = tk.Radiobutton(root, text="RSI", variable=self.strategy_var, value="RSI")
+        self.strategy_macd = tk.Radiobutton(root, text="MACD", variable=self.strategy_var, value="MACD")
+        self.strategy_rsi.pack()
+        self.strategy_macd.pack()
+
+        # Start pogas
+        self.start_button = tk.Button(root, text="Sākt tirdzniecību", command=self.start_trading)
+        self.start_button.pack()
+
+    def start_trading(self):
+        symbol = self.symbol_entry.get()
+        strategy = self.strategy_var.get()
+
+        try:
+            data = get_binance_data(symbol)
+            if strategy == "RSI":
+                action = rsi_strategy(data)
+            elif strategy == "MACD":
+                action = macd_strategy(data)
+            else:
+                action = "Nepareiza stratēģija"
+
+            result_label.config(text=f"Lēmums: {action}")
+        except Exception as e:
+            result_label.config(text=f"Kļūda: {str(e)}")
+
+# Izveidojam GUI logu
+root = tk.Tk()
+app = TradingApp(root)
+
+# Rezultāta attēlošana
+result_label = tk.Label(root, text="")
+result_label.pack()
+
+# Startējam GUI
+root.mainloop()
